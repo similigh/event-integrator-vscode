@@ -1,0 +1,76 @@
+# =============================================================================
+# Auto-Close Duplicate Issues
+# =============================================================================
+# Runs daily at 10:00 UTC to close issues whose grace period has expired.
+# Also supports manual trigger via workflow_dispatch.
+#
+# Downloads the pre-built simili binary from similigh/simili-bot releases.
+#
+# Required permissions:
+#   issues: write  – to close and label issues
+# =============================================================================
+
+name: Auto-Close Duplicates
+
+on:
+  schedule:
+    # Daily at 10:00 UTC
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (no side effects)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      grace_period_minutes:
+        description: 'Override grace period in minutes (leave empty to use config default)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  auto-close:
+    name: Auto-Close Expired Duplicates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download simili CLI
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/similigh/simili-bot/releases/latest \
+            | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION=${LATEST#v}
+          curl -sL "https://github.com/similigh/simili-bot/releases/download/${LATEST}/simili-bot_${VERSION}_linux_amd64.tar.gz" \
+            -o simili-bot.tar.gz
+          tar -xzf simili-bot.tar.gz simili
+          chmod +x simili
+
+      - name: Run auto-close
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+
+          GRACE_FLAG=""
+          if [ -n "${{ inputs.grace_period_minutes }}" ]; then
+            GRACE_FLAG="--grace-period-minutes ${{ inputs.grace_period_minutes }}"
+          fi
+
+          ./simili auto-close \
+            --repo "${{ github.repository }}" \
+            --config .github/simili.yaml \
+            --verbose \
+            $DRY_RUN_FLAG \
+            $GRACE_FLAG
